@@ -1,0 +1,8 @@
+{
+  "name": "Horizon Zero Dawn Support",
+  "author": "agc93",
+  "version": "0.0.2",
+  "description": "Adds support for installing and managing Horizon Zero Dawn mods with Vortex.",
+  "type": "game",
+  "bundled": true
+}
