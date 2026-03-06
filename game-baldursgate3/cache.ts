@@ -3,7 +3,7 @@ import * as path from 'path';
 import { fs, log, selectors, types, util } from 'vortex-api';
 
 import { GAME_ID } from './common';
-import { listPackage } from './divineWrapper';
+import { listPakFiles } from './pakParser';
 import { IPakInfo } from './types';
 import { extractPakInfoImpl, logDebug } from './util';
 
@@ -54,7 +54,7 @@ export default class PakInfoCache {
     const cacheEntry = await this.mCache.get(id);
     const packageNotListed = (cacheEntry?.packageList || []).length === 0;
     if (!cacheEntry || hasChanged(cacheEntry) || packageNotListed) {
-      const packageList = await listPackage(api, filePath);
+      const packageList = await listPakFiles(filePath);
       const isListed = this.isLOListed(api, filePath, packageList);
       const info = await extractPakInfoImpl(api, filePath, mod, isListed);
       this.mCache.set(id, {

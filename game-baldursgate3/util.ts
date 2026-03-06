@@ -1,12 +1,10 @@
 /* eslint-disable */
 import * as path from 'path';
 import * as semver from 'semver';
-import { generate as shortid } from 'shortid';
-import walk from 'turbowalk';
 import { actions, fs, types, selectors, log, util } from 'vortex-api';
 import { Builder, parseStringPromise } from 'xml2js';
 import { DEBUG, MOD_TYPE_LSLIB, GAME_ID, DEFAULT_MOD_SETTINGS_V8, DEFAULT_MOD_SETTINGS_V7, DEFAULT_MOD_SETTINGS_V6 } from './common';
-import { extractPak } from './divineWrapper';
+import { extractPakMeta } from './pakParser';
 import { IModSettings, IPakInfo, IModNode, IXmlNode, LOFormat } from './types';
 
 export function getGamePath(api): string {
@@ -338,25 +336,9 @@ export async function extractPakInfoImpl(api: types.IExtensionApi, pakPath: stri
 }
 
 export async function extractMeta(api: types.IExtensionApi, pakPath: string, mod: types.IMod): Promise<IModSettings> {
-  const metaPath = path.join(util.getVortexPath('temp'), 'lsmeta', shortid());
-  await fs.ensureDirAsync(metaPath);
-  await extractPak(api, pakPath, metaPath, '*/meta.lsx');
   try {
-    // the meta.lsx may be in a subdirectory. There is probably a pattern here
-    // but we'll just use it from wherever
-    let metaLSXPath: string = path.join(metaPath, 'meta.lsx');
-    await walk(metaPath, entries => {
-      const temp = entries.find(e => path.basename(e.filePath).toLowerCase() === 'meta.lsx');
-      if (temp !== undefined) {
-        metaLSXPath = temp.filePath;
-      }
-    });
-    const dat = await fs.readFileAsync(metaLSXPath);
-    const meta = await parseStringPromise(dat);
-    await fs.removeAsync(metaPath);
-    return meta;
+    return await extractPakMeta(pakPath);
   } catch (err) {
-    await fs.removeAsync(metaPath);
     if (err.code === 'ENOENT') {
       return Promise.resolve(undefined);
     } else if (err.message.includes('Column') && (err.message.includes('Line'))) {

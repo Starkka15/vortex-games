@@ -58,7 +58,7 @@ export function InfoPanelWrap(props: IBaseProps) {
   }, [api]);
 
   const isLsLibInstalled = React.useCallback(() => {
-    return getLatestLSLibMod(api) !== undefined;
+    return process.platform === 'linux' || getLatestLSLibMod(api) !== undefined;
   }, [api]);
 
   const onInstallLSLib = React.useCallback(() => {

@@ -10,7 +10,6 @@ import { Builder, parseStringPromise, RenderOptions } from 'xml2js';
 import { LockedState } from 'vortex-api/lib/extensions/file_based_loadorder/types/types';
 import { IOpenOptions, ISaveOptions } from 'vortex-api/lib/types/IExtensionContext';
 
-import { DivineExecMissing } from './divineWrapper';
 import { findNode, forceRefresh, getActivePlayerProfile, getDefaultModSettingsFormat, getPlayerProfiles, logDebug, modsPath, profilesPath } from './util';
 
 import PakInfoCache, { ICacheEntry } from './cache';
@@ -629,10 +628,6 @@ export async function validate(prev: types.LoadOrder,
 
 async function readPAKs(api: types.IExtensionApi) : Promise<Array<ICacheEntry>> {
   const state = api.getState();
-  const lsLib = getLatestLSLibMod(api);
-  if (lsLib === undefined) {
-    return [];
-  }
 
   const paks = await readPAKList(api);
 
@@ -664,19 +659,10 @@ async function readPAKs(api: types.IExtensionApi) : Promise<Array<ICacheEntry>> 
           const pakPath = path.join(modsPath(), fileName);
           return cache.getCacheEntry(api, pakPath, mod);
         } catch (err) {
-          if (err instanceof DivineExecMissing) {
-            const message = 'The installed copy of LSLib/Divine is corrupted - please '
-              + 'delete the existing LSLib mod entry and re-install it. Make sure to '
-              + 'disable or add any necessary exceptions to your security software to '
-              + 'ensure it does not interfere with Vortex/LSLib file operations.';
-            api.showErrorNotification('Divine executable is missing', message,
-              { allowReport: false });
-            return undefined;
-          }
           // could happen if the file got deleted since reading the list of paks.
           // actually, this seems to be fairly common when updating a mod
           if (err.code !== 'ENOENT') {
-            api.showErrorNotification('Failed to read pak. Please make sure you are using the latest version of LSLib by using the "Re-install LSLib/Divine" toolbar button on the Mods page.', err, {
+            api.showErrorNotification('Failed to read pak file', err, {
               allowReport: false,
               message: fileName,
             });
@@ -714,36 +700,6 @@ async function readPAKList(api: types.IExtensionApi) {
   }
 
   return paks;
-}
-
-function getLatestLSLibMod(api: types.IExtensionApi) {
-  const state = api.getState();
-  const mods: { [modId: string]: types.IMod } = state.persistent.mods[GAME_ID];
-  if (mods === undefined) {
-    log('warn', 'LSLib is not installed');
-    return undefined;
-  }
-  const lsLib: types.IMod = Object.keys(mods).reduce((prev: types.IMod, id: string) => {
-    if (mods[id].type === 'bg3-lslib-divine-tool') {
-      const latestVer = util.getSafe(prev, ['attributes', 'version'], '0.0.0');
-      const currentVer = util.getSafe(mods[id], ['attributes', 'version'], '0.0.0');
-      try {
-        if (semver.gt(currentVer, latestVer)) {
-          prev = mods[id];
-        }
-      } catch (err) {
-        log('warn', 'invalid mod version', { modId: id, version: currentVer });
-      }
-    }
-    return prev;
-  }, undefined);
-
-  if (lsLib === undefined) {
-    log('warn', 'LSLib is not installed');
-    return undefined;
-  }
-
-  return lsLib;
 }
 
 export function genProps(context: types.IExtensionContext, profileId?: string): IProps {

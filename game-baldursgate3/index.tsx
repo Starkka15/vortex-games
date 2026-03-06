@@ -208,9 +208,11 @@ async function onGameModeActivated(api: types.IExtensionApi, gameId: string) {
     });
   }
 
-  const latestVer: string = getLatestInstalledLSLibVer(api);
-  if (latestVer === '0.0.0') {
-    await gitHubDownloader.downloadDivine(api);
+  if (process.platform !== 'linux') {
+    const latestVer: string = getLatestInstalledLSLibVer(api);
+    if (latestVer === '0.0.0') {
+      await gitHubDownloader.downloadDivine(api);
+    }
   }
 }
 
@@ -267,8 +269,8 @@ function main(context: types.IExtensionContext) {
   }, () => {
     const state = context.api.store.getState();
     const gameMode = selectors.activeGameId(state);
-    return gameMode === GAME_ID;
-  });  
+    return gameMode === GAME_ID && process.platform !== 'linux';
+  });
 
   context.registerInstaller('bg3-lslib-divine-tool', 15, testLSLib as any, installLSLib as any);
   context.registerInstaller('bg3-bg3se', 15, testBG3SE as any, installBG3SE as any);
