@@ -1,0 +1,6 @@
+{
+  "name": "BioShock Vortex Extension",
+  "author": "ChemBoy1 (modified by Starkka15 for Linux support)",
+  "version": "0.7.0",
+  "description": "Adds BioShock Remastered modding support to Vortex. Based on ChemBoy1's BioShock Vortex Extension v0.6.0, with Linux/Proton compatibility fixes."
+}
