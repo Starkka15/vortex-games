@@ -16,7 +16,7 @@ const MERGER_RELPATH = 'WitcherScriptMerger';
 
 const MERGER_CONFIG_FILE = 'WitcherScriptMerger.exe.config';
 
-const { getHash, MD5ComparisonError, SCRIPT_MERGER_ID } = require('./common');
+const { getHash, MD5ComparisonError, SCRIPT_MERGER_ID, SCRIPT_MERGER_EXEC } = require('./common');
 
 
 function query(baseUrl, request) {
@@ -103,13 +103,17 @@ async function getMergerVersion(api: types.IExtensionApi) {
         if (merger?.mergerVersion !== undefined) {
           return Promise.resolve(merger.mergerVersion);
         }
-        const execVersion = getVersion(merger.path);
-        if (!!execVersion) {
-          const trimmedVersion = execVersion.split('.').slice(0, 3).join('.');
-          const newToolDetails = { ...merger, mergerVersion: trimmedVersion };
-          api.store.dispatch(actions.addDiscoveredTool('witcher3', SCRIPT_MERGER_ID, newToolDetails, true));
-          return Promise.resolve(trimmedVersion);
+        // exe-version only works on Windows PE files
+        if (process.platform === 'win32') {
+          const execVersion = getVersion(merger.path);
+          if (!!execVersion) {
+            const trimmedVersion = execVersion.split('.').slice(0, 3).join('.');
+            const newToolDetails = { ...merger, mergerVersion: trimmedVersion };
+            api.store.dispatch(actions.addDiscoveredTool('witcher3', SCRIPT_MERGER_ID, newToolDetails, true));
+            return Promise.resolve(trimmedVersion);
+          }
         }
+        return Promise.resolve(undefined);
       })
       .catch(err => Promise.resolve(undefined));
   } else {
@@ -154,7 +158,7 @@ async function onDownloadComplete(api, archivePath, mostRecentVersion) {
   })
   .then((archivePath) => extractScriptMerger(api, archivePath))
   .then(async (mergerPath) => {
-    const mergerExec = path.join(mergerPath, 'WitcherScriptMerger.exe');
+    const mergerExec = path.join(mergerPath, SCRIPT_MERGER_EXEC);
     let execHash;
     try {
       execHash = await getHash(mergerExec);
@@ -171,6 +175,62 @@ async function onDownloadComplete(api, archivePath, mostRecentVersion) {
     return Promise.resolve(mergerPath);
   })
   .then((mergerPath) => setUpMerger(api, mostRecentVersion, mergerPath))
+}
+
+async function installLinuxScriptMerger(api: types.IExtensionApi) {
+  const state = api.store.getState();
+  const discovery = util.getSafe(state, ['settings', 'gameMode', 'discovered', 'witcher3'], undefined);
+  if (discovery?.path === undefined) {
+    return Promise.reject(new util.SetupError('Witcher3 is not discovered'));
+  }
+
+  const mergerDir = path.join(discovery.path, MERGER_RELPATH);
+  await fs.ensureDirWritableAsync(mergerDir);
+
+  const bundledBinary = path.join(__dirname, 'bin', 'tw3-script-merger');
+  const destBinary = path.join(mergerDir, 'tw3-script-merger');
+
+  try {
+    await fs.statAsync(bundledBinary);
+  } catch (err) {
+    log('warn', 'Bundled tw3-script-merger binary not found', { path: bundledBinary });
+    return;
+  }
+
+  // Copy binary if not already there or if bundled is newer
+  try {
+    const srcStat = await fs.statAsync(bundledBinary);
+    let needsCopy = true;
+    try {
+      const dstStat = await fs.statAsync(destBinary);
+      needsCopy = srcStat.size !== dstStat.size;
+    } catch {
+      // dest doesn't exist
+    }
+    if (needsCopy) {
+      await fs.copyAsync(bundledBinary, destBinary);
+      // Ensure executable permission
+      const nativeFs = require('fs');
+      nativeFs.chmodSync(destBinary, 0o755);
+    }
+  } catch (err) {
+    log('error', 'Failed to install Linux script merger', err);
+    return;
+  }
+
+  // Register the tool
+  const newToolDetails = {
+    id: SCRIPT_MERGER_ID,
+    name: 'W3 Script Merger',
+    logo: 'WitcherScriptMerger.jpg',
+    executable: () => SCRIPT_MERGER_EXEC,
+    requiredFiles: [SCRIPT_MERGER_EXEC],
+    path: destBinary,
+    workingDirectory: discovery.path,
+    mergerVersion: '1.0.0',
+  };
+  api.store.dispatch(actions.addDiscoveredTool('witcher3', SCRIPT_MERGER_ID, newToolDetails, true));
+  log('info', 'Linux script merger installed', { path: destBinary });
 }
 
 export async function getScriptMergerDir(api, create = false) {
@@ -196,6 +256,9 @@ export async function getScriptMergerDir(api, create = false) {
 }
 
 export async function downloadScriptMerger(api: types.IExtensionApi) {
+  if (process.platform !== 'win32') {
+    return installLinuxScriptMerger(api);
+  }
   const state = api.store.getState();
   const discovery = util.getSafe(state, ['settings', 'gameMode', 'discovered', 'witcher3'], undefined);
   if (discovery?.path === undefined) {
@@ -412,13 +475,13 @@ async function setUpMerger(api, mergerVersion, newPath) {
       id: SCRIPT_MERGER_ID,
       name: 'W3 Script Merger',
       logo: 'WitcherScriptMerger.jpg',
-      executable: () => 'WitcherScriptMerger.exe',
+      executable: () => SCRIPT_MERGER_EXEC,
       requiredFiles: [
-        'WitcherScriptMerger.exe',
+        SCRIPT_MERGER_EXEC,
       ],
       mergerVersion,
     };
-  newToolDetails.path = path.join(newPath, 'WitcherScriptMerger.exe');
+  newToolDetails.path = path.join(newPath, SCRIPT_MERGER_EXEC);
   newToolDetails.workingDirectory = newPath;
   await setMergerConfig(discovery.path, newPath);
   api.store.dispatch(actions.addDiscoveredTool('witcher3', SCRIPT_MERGER_ID, newToolDetails, true));
@@ -426,6 +489,10 @@ async function setUpMerger(api, mergerVersion, newPath) {
 }
 
 export async function getMergedModName(scriptMergerPath) {
+  if (process.platform !== 'win32') {
+    // Linux: Rust merger uses default output name
+    return 'mod0000_MergedFiles';
+  }
   const configFilePath = path.join(scriptMergerPath, MERGER_CONFIG_FILE);
   try {
     const data = await fs.readFileAsync(configFilePath, { encoding: 'utf8' });
@@ -443,6 +510,10 @@ export async function getMergedModName(scriptMergerPath) {
 }
 
 export async function setMergerConfig(gameRootPath, scriptMergerPath) {
+  if (process.platform !== 'win32') {
+    // Linux: Rust merger uses CLI args, no config file needed
+    return;
+  }
   const findIndex = (nodes, id) => {
     return nodes?.findIndex(iter => iter.$?.key === id) ?? undefined;
   };

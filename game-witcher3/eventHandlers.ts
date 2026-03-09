@@ -5,7 +5,8 @@ import { setPriorityType } from './actions';
 
 import {
   GAME_ID, getPriorityTypeBranch, PART_SUFFIX,
-  INPUT_XML_FILENAME, SCRIPT_MERGER_ID, I18N_NAMESPACE
+  INPUT_XML_FILENAME, SCRIPT_MERGER_ID, SCRIPT_MERGER_EXEC,
+  I18N_NAMESPACE
 } from './common';
 
 import * as menuMod from './menumod';
@@ -13,6 +14,7 @@ import { storeToProfile, restoreFromProfile } from './mergeBackup';
 import { validateProfile, forceRefresh, suppressEventHandlers, notifyMissingScriptMerger } from './util';
 import { PriorityManager } from './priorityManager';
 import { IRemoveModOptions } from './types';
+import { runMergerWithConflictResolution } from './conflictResolver';
 
 import IniStructure from './iniParser';
 import { getPersistentLoadOrder } from './migrations';
@@ -190,7 +192,52 @@ function getScriptMergerTool(api) {
   return undefined;
 }
 
+function findLinuxMergerBinary(api): string | undefined {
+  const state = api.store.getState();
+  const discovery = util.getSafe(state,
+    ['settings', 'gameMode', 'discovered', GAME_ID], undefined);
+  if (!discovery?.path) return undefined;
+
+  const path = require('path');
+  // Check game's WitcherScriptMerger directory first
+  const gameDir = path.join(discovery.path, 'WitcherScriptMerger', SCRIPT_MERGER_EXEC);
+  try {
+    const nativeFs = require('fs');
+    nativeFs.accessSync(gameDir, nativeFs.constants.X_OK);
+    return gameDir;
+  } catch {
+    // Not in game dir, check bundled
+  }
+
+  const bundled = path.join(__dirname, 'bin', SCRIPT_MERGER_EXEC);
+  try {
+    const nativeFs = require('fs');
+    nativeFs.accessSync(bundled, nativeFs.constants.X_OK);
+    return bundled;
+  } catch {
+    return undefined;
+  }
+}
+
 function runScriptMerger(api) {
+  // On Linux, find and use the Rust CLI merger directly
+  if (process.platform !== 'win32') {
+    const mergerPath = findLinuxMergerBinary(api);
+    if (!mergerPath) {
+      notifyMissingScriptMerger(api);
+      return Promise.resolve();
+    }
+    const state = api.store.getState();
+    const discovery = util.getSafe(state,
+      ['settings', 'gameMode', 'discovered', GAME_ID], undefined);
+    if (discovery?.path) {
+      return runMergerWithConflictResolution(api, mergerPath, discovery.path)
+        .catch(err => api.showErrorNotification('Failed to run script merger', err,
+          { allowReport: ['EPERM', 'EACCESS', 'ENOENT'].indexOf(err.code) !== -1 }));
+    }
+    return Promise.resolve();
+  }
+
   const tool = getScriptMergerTool(api);
   if (tool?.path === undefined) {
     notifyMissingScriptMerger(api);
@@ -210,7 +257,10 @@ function queryScriptMerge(api: types.IExtensionApi, reason: string) {
     return;
   }
   const scriptMergerTool = util.getSafe(state, ['settings', 'gameMode', 'discovered', GAME_ID, 'tools', SCRIPT_MERGER_ID], undefined);
-  if (!!scriptMergerTool?.path) {
+  const hasMerger = process.platform !== 'win32'
+    ? !!findLinuxMergerBinary(api)
+    : !!scriptMergerTool?.path;
+  if (hasMerger) {
     api.sendNotification({
       id: 'witcher3-merge',
       type: 'warning',

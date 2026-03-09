@@ -13,7 +13,7 @@ import CollectionsDataView from './views/CollectionsDataView';
 import { downloadScriptMerger, getScriptMergerDir, setMergerConfig } from './scriptmerger';
 
 import { DO_NOT_DEPLOY, GAME_ID, getLoadOrderFilePath,
-  LOCKED_PREFIX, SCRIPT_MERGER_ID
+  LOCKED_PREFIX, SCRIPT_MERGER_ID, SCRIPT_MERGER_EXEC
 } from './common';
 
 import { testDLC, testTL } from './modTypes';
@@ -50,9 +50,9 @@ const tools: types.ITool[] = [
     id: SCRIPT_MERGER_ID,
     name: 'W3 Script Merger',
     logo: 'WitcherScriptMerger.jpg',
-    executable: () => 'WitcherScriptMerger.exe',
+    executable: () => SCRIPT_MERGER_EXEC,
     requiredFiles: [
-      'WitcherScriptMerger.exe',
+      SCRIPT_MERGER_EXEC,
     ],
   },
   {

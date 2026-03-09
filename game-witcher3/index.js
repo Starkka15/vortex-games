@@ -73,6 +73,8 @@ let react_i18next = require("react-i18next");
 let react_redux = require("react-redux");
 require("ini");
 let redux_act = require("redux-act");
+let child_process = require("child_process");
+let readline = require("readline");
 
 //#region extensions/games/game-witcher3/common.ts
 var common_exports = /* @__PURE__ */ __exportAll({
@@ -92,6 +94,7 @@ var common_exports = /* @__PURE__ */ __exportAll({
 	NON_SORTABLE: () => NON_SORTABLE,
 	PART_SUFFIX: () => PART_SUFFIX,
 	ResourceInaccessibleError: () => ResourceInaccessibleError,
+	SCRIPT_MERGER_EXEC: () => SCRIPT_MERGER_EXEC$1,
 	SCRIPT_MERGER_FILES: () => SCRIPT_MERGER_FILES,
 	SCRIPT_MERGER_ID: () => SCRIPT_MERGER_ID$1,
 	UNI_PATCH: () => UNI_PATCH,
@@ -138,7 +141,7 @@ function getSuppressModLimitBranch() {
 		"suppressModLimitPatch"
 	];
 }
-var MD5ComparisonError$1, ResourceInaccessibleError, MergeDataViolationError, GAME_ID, INPUT_XML_FILENAME, VORTEX_BACKUP_TAG, PART_SUFFIX, SCRIPT_MERGER_ID$1, MERGE_INV_MANIFEST, LOAD_ORDER_FILENAME, I18N_NAMESPACE, CONFIG_MATRIX_REL_PATH, CONFIG_MATRIX_FILES, W3_TEMP_DATA_DIR, UNI_PATCH, LOCKED_PREFIX, DO_NOT_DISPLAY, DO_NOT_DEPLOY, SCRIPT_MERGER_FILES, NON_SORTABLE, ACTIVITY_ID_IMPORTING_LOADORDER;
+var MD5ComparisonError$1, ResourceInaccessibleError, MergeDataViolationError, GAME_ID, INPUT_XML_FILENAME, VORTEX_BACKUP_TAG, PART_SUFFIX, SCRIPT_MERGER_ID$1, MERGE_INV_MANIFEST, LOAD_ORDER_FILENAME, I18N_NAMESPACE, CONFIG_MATRIX_REL_PATH, CONFIG_MATRIX_FILES, W3_TEMP_DATA_DIR, UNI_PATCH, LOCKED_PREFIX, DO_NOT_DISPLAY, DO_NOT_DEPLOY, SCRIPT_MERGER_FILES, SCRIPT_MERGER_EXEC$1, NON_SORTABLE, ACTIVITY_ID_IMPORTING_LOADORDER;
 var init_common = __esmMin((() => {
 	MD5ComparisonError$1 = class extends Error {
 		constructor(message, file) {
@@ -213,7 +216,8 @@ var init_common = __esmMin((() => {
 	LOCKED_PREFIX = "mod0000_";
 	DO_NOT_DISPLAY = ["communitypatch-base"];
 	DO_NOT_DEPLOY = ["README.TXT", `**/*${PART_SUFFIX.toUpperCase()}`];
-	SCRIPT_MERGER_FILES = ["WitcherScriptMerger.exe"];
+	SCRIPT_MERGER_FILES = process.platform === "win32" ? ["WitcherScriptMerger.exe"] : ["tw3-script-merger"];
+	SCRIPT_MERGER_EXEC$1 = process.platform === "win32" ? "WitcherScriptMerger.exe" : "tw3-script-merger";
 	NON_SORTABLE = ["witcher3menumoddocuments", "collection"];
 	ACTIVITY_ID_IMPORTING_LOADORDER = "activity-witcher3-importing-loadorder";
 }));
@@ -1230,7 +1234,7 @@ const RELEASE_CUTOFF = "0.6.5";
 const GITHUB_URL = "https://api.github.com/repos/IDCs/WitcherScriptMerger";
 const MERGER_RELPATH = "WitcherScriptMerger";
 const MERGER_CONFIG_FILE = "WitcherScriptMerger.exe.config";
-const { getHash, MD5ComparisonError, SCRIPT_MERGER_ID } = (init_common(), __toCommonJS(common_exports));
+const { getHash, MD5ComparisonError, SCRIPT_MERGER_ID, SCRIPT_MERGER_EXEC } = (init_common(), __toCommonJS(common_exports));
 function query(baseUrl, request) {
 	return new Promise((resolve, reject) => {
 		const relUrl = url.default.parse(`${baseUrl}/${request}`);
@@ -1299,16 +1303,19 @@ async function getMergerVersion(api) {
 	if (merger === void 0) return Promise.resolve(void 0);
 	if (!!merger?.path) return vortex_api.fs.statAsync(merger.path).then(() => {
 		if (merger?.mergerVersion !== void 0) return Promise.resolve(merger.mergerVersion);
-		const execVersion = (0, exe_version.default)(merger.path);
-		if (!!execVersion) {
-			const trimmedVersion = execVersion.split(".").slice(0, 3).join(".");
-			const newToolDetails = {
-				...merger,
-				mergerVersion: trimmedVersion
-			};
-			api.store.dispatch(vortex_api.actions.addDiscoveredTool("witcher3", SCRIPT_MERGER_ID, newToolDetails, true));
-			return Promise.resolve(trimmedVersion);
+		if (process.platform === "win32") {
+			const execVersion = (0, exe_version.default)(merger.path);
+			if (!!execVersion) {
+				const trimmedVersion = execVersion.split(".").slice(0, 3).join(".");
+				const newToolDetails = {
+					...merger,
+					mergerVersion: trimmedVersion
+				};
+				api.store.dispatch(vortex_api.actions.addDiscoveredTool("witcher3", SCRIPT_MERGER_ID, newToolDetails, true));
+				return Promise.resolve(trimmedVersion);
+			}
 		}
+		return Promise.resolve(void 0);
 	}).catch((err) => Promise.resolve(void 0));
 	else return Promise.resolve(void 0);
 }
@@ -1334,7 +1341,7 @@ async function onDownloadComplete(api, archivePath, mostRecentVersion) {
 		if ((await getCache(api)).find((entry) => entry.archiveChecksum.toLowerCase() === archiveHash && entry.version === mostRecentVersion) === void 0) return reject(new MD5ComparisonError("Corrupted archive download", archivePath));
 		return resolve(archivePath);
 	}).then((archivePath) => extractScriptMerger(api, archivePath)).then(async (mergerPath) => {
-		const mergerExec = path.default.join(mergerPath, "WitcherScriptMerger.exe");
+		const mergerExec = path.default.join(mergerPath, SCRIPT_MERGER_EXEC);
 		let execHash;
 		try {
 			execHash = await getHash(mergerExec);
@@ -1344,6 +1351,53 @@ async function onDownloadComplete(api, archivePath, mostRecentVersion) {
 		if ((await getCache(api)).find((entry) => entry.execChecksum.toLowerCase() === execHash && entry.version === mostRecentVersion) === void 0) return Promise.reject(new MD5ComparisonError("Corrupted executable", mergerExec));
 		return Promise.resolve(mergerPath);
 	}).then((mergerPath) => setUpMerger(api, mostRecentVersion, mergerPath));
+}
+async function installLinuxScriptMerger(api) {
+	const state = api.store.getState();
+	const discovery = vortex_api.util.getSafe(state, [
+		"settings",
+		"gameMode",
+		"discovered",
+		"witcher3"
+	], void 0);
+	if (discovery?.path === void 0) return Promise.reject(new vortex_api.util.SetupError("Witcher3 is not discovered"));
+	const mergerDir = path.default.join(discovery.path, MERGER_RELPATH);
+	await vortex_api.fs.ensureDirWritableAsync(mergerDir);
+	const bundledBinary = path.default.join(__dirname, "bin", "tw3-script-merger");
+	const destBinary = path.default.join(mergerDir, "tw3-script-merger");
+	try {
+		await vortex_api.fs.statAsync(bundledBinary);
+	} catch (err) {
+		(0, vortex_api.log)("warn", "Bundled tw3-script-merger binary not found", { path: bundledBinary });
+		return;
+	}
+	try {
+		const srcStat = await vortex_api.fs.statAsync(bundledBinary);
+		let needsCopy = true;
+		try {
+			const dstStat = await vortex_api.fs.statAsync(destBinary);
+			needsCopy = srcStat.size !== dstStat.size;
+		} catch {}
+		if (needsCopy) {
+			await vortex_api.fs.copyAsync(bundledBinary, destBinary);
+			require("fs").chmodSync(destBinary, 493);
+		}
+	} catch (err) {
+		(0, vortex_api.log)("error", "Failed to install Linux script merger", err);
+		return;
+	}
+	const newToolDetails = {
+		id: SCRIPT_MERGER_ID,
+		name: "W3 Script Merger",
+		logo: "WitcherScriptMerger.jpg",
+		executable: () => SCRIPT_MERGER_EXEC,
+		requiredFiles: [SCRIPT_MERGER_EXEC],
+		path: destBinary,
+		workingDirectory: discovery.path,
+		mergerVersion: "1.0.0"
+	};
+	api.store.dispatch(vortex_api.actions.addDiscoveredTool("witcher3", SCRIPT_MERGER_ID, newToolDetails, true));
+	(0, vortex_api.log)("info", "Linux script merger installed", { path: destBinary });
 }
 async function getScriptMergerDir(api, create = false) {
 	const state = api.getState();
@@ -1366,6 +1420,7 @@ async function getScriptMergerDir(api, create = false) {
 	}
 }
 async function downloadScriptMerger(api) {
+	if (process.platform !== "win32") return installLinuxScriptMerger(api);
 	const state = api.store.getState();
 	const discovery = vortex_api.util.getSafe(state, [
 		"settings",
@@ -1537,17 +1592,18 @@ async function setUpMerger(api, mergerVersion, newPath) {
 		id: SCRIPT_MERGER_ID,
 		name: "W3 Script Merger",
 		logo: "WitcherScriptMerger.jpg",
-		executable: () => "WitcherScriptMerger.exe",
-		requiredFiles: ["WitcherScriptMerger.exe"],
+		executable: () => SCRIPT_MERGER_EXEC,
+		requiredFiles: [SCRIPT_MERGER_EXEC],
 		mergerVersion
 	};
-	newToolDetails.path = path.default.join(newPath, "WitcherScriptMerger.exe");
+	newToolDetails.path = path.default.join(newPath, SCRIPT_MERGER_EXEC);
 	newToolDetails.workingDirectory = newPath;
 	await setMergerConfig(discovery.path, newPath);
 	api.store.dispatch(vortex_api.actions.addDiscoveredTool("witcher3", SCRIPT_MERGER_ID, newToolDetails, true));
 	return Promise.resolve();
 }
 async function getMergedModName(scriptMergerPath) {
+	if (process.platform !== "win32") return "mod0000_MergedFiles";
 	const configFilePath = path.default.join(scriptMergerPath, MERGER_CONFIG_FILE);
 	try {
 		const MergedModName = ((await (0, xml2js.parseStringPromise)(await vortex_api.fs.readFileAsync(configFilePath, { encoding: "utf8" })))?.configuration?.appSettings?.[0]?.add)?.find((item) => item.$?.key === "MergedModName") ?? void 0;
@@ -1558,6 +1614,7 @@ async function getMergedModName(scriptMergerPath) {
 	}
 }
 async function setMergerConfig(gameRootPath, scriptMergerPath) {
+	if (process.platform !== "win32") return;
 	const findIndex = (nodes, id) => {
 		return nodes?.findIndex((iter) => iter.$?.key === id) ?? void 0;
 	};
@@ -2843,6 +2900,135 @@ const W3Reducer = {
 };
 
 //#endregion
+//#region extensions/games/game-witcher3/conflictResolver.ts
+function canAutoResolve(conflict) {
+	const oursT = conflict.ours.trim();
+	const origT = conflict.original.trim();
+	const theirsT = conflict.theirs.trim();
+	if (oursT === origT && oursT !== theirsT) return conflict.theirs;
+	if (theirsT === origT && oursT !== theirsT) return conflict.ours;
+	if (!oursT && !origT) return conflict.theirs;
+	if (!theirsT && !origT) return conflict.ours;
+	return null;
+}
+function formatPreview(text, label, maxLines = 20) {
+	const lines = (text || "(empty)").split(/\r?\n/);
+	return `--- ${label} ---\n${lines.slice(0, maxLines).join("\n")}${lines.length > maxLines ? "\n...(truncated)" : ""}`;
+}
+async function showConflictDialog(api, conflict, fileName, modName, conflictIndex, totalConflicts) {
+	const message = [
+		formatPreview(conflict.ours, "A: Current Merged Version"),
+		"",
+		formatPreview(conflict.original, "B: Vanilla (Original)"),
+		"",
+		formatPreview(conflict.theirs, `C: ${modName}`)
+	].join("\n");
+	switch ((await api.showDialog("question", "Script Merge Conflict", {
+		bbcode: `[b]File:[/b] ${fileName}[br][b]Mod:[/b] ${modName}[br][b]Conflict ${conflictIndex + 1} of ${totalConflicts}[/b]`,
+		message,
+		options: { wrap: false }
+	}, [
+		{ label: "A - Keep Merged" },
+		{ label: "B - Use Vanilla" },
+		{
+			label: "C - Use Mod",
+			default: true
+		}
+	])).action) {
+		case "A - Keep Merged": return conflict.ours;
+		case "B - Use Vanilla": return conflict.original;
+		case "C - Use Mod": return conflict.theirs;
+		default: return conflict.theirs;
+	}
+}
+function replaceConflictMarkers(content, resolutions) {
+	let idx = 0;
+	return content.replace(/<<<<<<< ours\r?\n[\s\S]*?\|\|\|\|\|\|\| original\r?\n[\s\S]*?=======\r?\n[\s\S]*?>>>>>>> theirs[^\n]*\n?/g, () => resolutions[idx++] ?? "");
+}
+async function runMergerWithConflictResolution(api, mergerPath, gamePath) {
+	const args = [
+		"--json",
+		"--input",
+		path.default.join(gamePath, "mods"),
+		"--output",
+		path.default.join(gamePath, "mods", "mod0000_MergedFiles", "content", "scripts"),
+		"--source",
+		path.default.join(gamePath, "content", "content0", "scripts"),
+		"--clean"
+	];
+	api.sendNotification({
+		id: "witcher3-merging",
+		type: "activity",
+		message: "Running Witcher 3 script merger..."
+	});
+	return new Promise((resolve, reject) => {
+		const proc = (0, child_process.spawn)(mergerPath, args, { cwd: gamePath });
+		const rl = (0, readline.createInterface)({ input: proc.stdout });
+		let stderr = "";
+		let autoResolved = 0;
+		let manualResolved = 0;
+		let processQueue = Promise.resolve();
+		rl.on("line", (line) => {
+			processQueue = processQueue.then(async () => {
+				const trimmed = line.trim();
+				if (!trimmed) return;
+				let message;
+				try {
+					message = JSON.parse(trimmed);
+				} catch {
+					return;
+				}
+				if (!message.file_name && message.conflicts.length === 0) return;
+				const resolutions = [];
+				for (let i = 0; i < message.conflicts.length; i++) {
+					const conflict = message.conflicts[i];
+					const auto = canAutoResolve(conflict);
+					if (auto !== null) {
+						resolutions.push(auto);
+						autoResolved++;
+					} else {
+						const chosen = await showConflictDialog(api, conflict, message.file_name, message.mod_name, i, message.conflicts.length);
+						resolutions.push(chosen);
+						manualResolved++;
+					}
+				}
+				const filePath = path.default.isAbsolute(message.file_path) ? message.file_path : path.default.join(gamePath, message.file_path);
+				try {
+					const resolved = replaceConflictMarkers(await vortex_api.fs.readFileAsync(filePath, { encoding: "utf8" }), resolutions);
+					await vortex_api.fs.writeFileAsync(filePath, resolved, { encoding: "utf8" });
+				} catch (err) {
+					api.showErrorNotification(`Failed to resolve conflict in ${message.file_name}`, err);
+				}
+			});
+		});
+		proc.stderr.on("data", (data) => {
+			stderr += data.toString();
+		});
+		proc.on("close", (code) => {
+			processQueue.then(() => {
+				api.dismissNotification("witcher3-merging");
+				const total = autoResolved + manualResolved;
+				if (code === 0 || code === null) {
+					if (total > 0) api.sendNotification({
+						type: "success",
+						message: `Script merge complete: ${autoResolved} auto-resolved, ${manualResolved} manual.`
+					});
+					else api.sendNotification({
+						type: "success",
+						message: "Script merge complete. No conflicts found."
+					});
+					resolve();
+				} else reject(/* @__PURE__ */ new Error(`Script merger exited with code ${code}${stderr ? ": " + stderr : ""}`));
+			});
+		});
+		proc.on("error", (err) => {
+			api.dismissNotification("witcher3-merging");
+			reject(err);
+		});
+	});
+}
+
+//#endregion
 //#region extensions/games/game-witcher3/eventHandlers.ts
 init_common();
 function onGameModeActivation(api) {
@@ -2952,7 +3138,52 @@ function getScriptMergerTool(api) {
 	], void 0);
 	if (!!scriptMerger?.path) return scriptMerger;
 }
+function findLinuxMergerBinary(api) {
+	const state = api.store.getState();
+	const discovery = vortex_api.util.getSafe(state, [
+		"settings",
+		"gameMode",
+		"discovered",
+		GAME_ID
+	], void 0);
+	if (!discovery?.path) return void 0;
+	const path$16 = require("path");
+	const gameDir = path$16.join(discovery.path, "WitcherScriptMerger", SCRIPT_MERGER_EXEC$1);
+	try {
+		const nativeFs = require("fs");
+		nativeFs.accessSync(gameDir, nativeFs.constants.X_OK);
+		return gameDir;
+	} catch {}
+	const bundled = path$16.join(__dirname, "bin", SCRIPT_MERGER_EXEC$1);
+	try {
+		const nativeFs = require("fs");
+		nativeFs.accessSync(bundled, nativeFs.constants.X_OK);
+		return bundled;
+	} catch {
+		return;
+	}
+}
 function runScriptMerger(api) {
+	if (process.platform !== "win32") {
+		const mergerPath = findLinuxMergerBinary(api);
+		if (!mergerPath) {
+			notifyMissingScriptMerger(api);
+			return Promise.resolve();
+		}
+		const state = api.store.getState();
+		const discovery = vortex_api.util.getSafe(state, [
+			"settings",
+			"gameMode",
+			"discovered",
+			GAME_ID
+		], void 0);
+		if (discovery?.path) return runMergerWithConflictResolution(api, mergerPath, discovery.path).catch((err) => api.showErrorNotification("Failed to run script merger", err, { allowReport: [
+			"EPERM",
+			"EACCESS",
+			"ENOENT"
+		].indexOf(err.code) !== -1 }));
+		return Promise.resolve();
+	}
 	const tool = getScriptMergerTool(api);
 	if (tool?.path === void 0) {
 		notifyMissingScriptMerger(api);
@@ -2968,14 +3199,15 @@ function queryScriptMerge(api, reason) {
 	const state = api.store.getState();
 	const t = api.translate;
 	if ((state.session.base.activity?.installing_dependencies ?? []).length > 0) return;
-	if (!!vortex_api.util.getSafe(state, [
+	const scriptMergerTool = vortex_api.util.getSafe(state, [
 		"settings",
 		"gameMode",
 		"discovered",
 		GAME_ID,
 		"tools",
 		SCRIPT_MERGER_ID$1
-	], void 0)?.path) api.sendNotification({
+	], void 0);
+	if (process.platform !== "win32" ? !!findLinuxMergerBinary(api) : !!scriptMergerTool?.path) api.sendNotification({
 		id: "witcher3-merge",
 		type: "warning",
 		message: t("Witcher Script merger may need to be executed", { ns: I18N_NAMESPACE }),
@@ -3011,8 +3243,8 @@ const tools = [
 		id: SCRIPT_MERGER_ID$1,
 		name: "W3 Script Merger",
 		logo: "WitcherScriptMerger.jpg",
-		executable: () => "WitcherScriptMerger.exe",
-		requiredFiles: ["WitcherScriptMerger.exe"]
+		executable: () => SCRIPT_MERGER_EXEC$1,
+		requiredFiles: [SCRIPT_MERGER_EXEC$1]
 	},
 	{
 		id: GAME_ID + "_DX11",
